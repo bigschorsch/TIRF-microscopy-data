@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import itertools
 from scipy.stats import norm, gaussian_kde
 import seaborn as sns
+from sdt.spatial import has_near_neighbor
 
 
 '------------------------------------------------------------------------------------------------------------------------------------'
@@ -111,54 +112,78 @@ def sm_density(data_sm, data_files_sm_filename, sm_start_frame, size_um, dol):
 
 
 '------------------------------------------------------------------------------------------------------------------------------------'
-def brightness(data_brightness, data_files_brightness_filename, brightness_start_frame, brightness_final_frame, size_um, dol):
-    surface_density_sm, sem_sm, data_loc_brightness=[], [], []
-    single_molecule_mean, single_molecule_bg, single_molecule_size=[],[],[]
 
-    for file in range(0,len(data_files_brightness_filename)):
+def brightness(
+    data_brightness,
+    data_files_brightness_filename,
+    brightness_start_frame,
+    brightness_final_frame,
+    size_um,
+    dol,
+    neighbor_radius=None
+):
+    # Outputs: pro Zeitpunkt jeweils 1 Wert (mean über Locations) + 1 SEM (über Locations)
+    sem_sm = []
+    single_molecule_mean = []
+    single_molecule_bg = []
+    single_molecule_size = []
+    data_loc_brightness = []  # Roh: [timepoint][location] -> DataFrame
 
-        #read and load the .h5 file
-        data=sorted(Path(data_brightness).glob(data_files_brightness_filename[file]+'*.h5'))
+    for file_idx in range(len(data_files_brightness_filename)):
+
+        # 1) Alle .h5 für diesen Zeitpunkt laden (typisch: 10 Locations)
+        data = sorted(Path(data_brightness).glob(data_files_brightness_filename[file_idx] + '*.h5'))
         data_load = [io.load(f) for f in data]
 
-        data_loc_brightness_file=[]
-        for i in range(0, len(data_load)):
-            data_loc_brightness_file.append(data_load[i][data_load[i]['frame'].between(brightness_start_frame, brightness_final_frame, inclusive='both')])
-            
-            
+        # 2) Pro Location DataFrame der isolierten Lokalisierungen bauen
+        data_loc_brightness_file = []
+        for i in range(len(data_load)):
+            loc = data_load[i][data_load[i]['frame'].between(
+                brightness_start_frame, brightness_final_frame, inclusive='both'
+            )].copy()
+
+            if neighbor_radius is not None and not loc.empty:
+                has_near_neighbor(loc, r=neighbor_radius)
+                loc = loc[loc["has_neighbor"] == 0]
+
+            data_loc_brightness_file.append(loc)
+
         data_loc_brightness.append(data_loc_brightness_file)
 
-        
-    
-    
-    #sm brightness: uplod brightness and background column from the localization table, make an average
-        single_molecule_mean_file=[]
-        single_molecule_bg_file=[]
-        single_molecule_size_file=[]
-        
-        for i in range(0,len(data_loc_brightness[file])):
+        # 3) Pro Location: Mittel über Fluorophore, dann über Locations aggregieren
+        loc_means = []
+        loc_bgs = []
+        loc_sizes = []
 
-    #brightness data
-            data_signal=data_loc_brightness[file][i]['mass']
-            single_molecule_mean_file.append(np.nanmean(data_signal))
-    
-    #background data
-            data_bg=data_loc_brightness[file][i]['bg']
-            single_molecule_bg_file.append(np.nanmean(data_bg))
+        for loc_df in data_loc_brightness_file:
+            # falls Location leer ist, NaN eintragen
+            if loc_df is None or loc_df.empty:
+                loc_means.append(np.nan)
+                loc_bgs.append(np.nan)
+                loc_sizes.append(np.nan)
+                continue
 
-    #size data
-            data_size=data_loc_brightness[file][i]['size']
-            single_molecule_size_file.append(np.nanmean(data_size))
+            loc_means.append(np.nanmean(loc_df['mass'].to_numpy()))
+            loc_bgs.append(np.nanmean(loc_df['bg'].to_numpy()))
+            loc_sizes.append(np.nanmean(loc_df['size'].to_numpy()))
 
-        single_molecule_mean.append(np.nanmean(single_molecule_mean_file))
-        single_molecule_bg.append(np.nanmean(single_molecule_bg_file))
-        single_molecule_size.append(np.nanmean(single_molecule_size_file))
-        
-        
-        
+        loc_means = np.asarray(loc_means, dtype=float)
 
-    
-    return single_molecule_mean, single_molecule_bg, single_molecule_size, data_loc_brightness
+        # Mean über Locations
+        single_molecule_mean.append(np.nanmean(loc_means))
+        single_molecule_bg.append(np.nanmean(np.asarray(loc_bgs, dtype=float)))
+        single_molecule_size.append(np.nanmean(np.asarray(loc_sizes, dtype=float)))
+
+        # SEM über Locations (für Plot-Errorbars)
+        n_eff = np.sum(~np.isnan(loc_means))
+        if n_eff >= 2:
+            sem_sm.append(np.nanstd(loc_means, ddof=1) / np.sqrt(n_eff))
+        else:
+            sem_sm.append(np.nan)
+
+    return single_molecule_mean, sem_sm, single_molecule_bg, single_molecule_size, data_loc_brightness
+
+
 
 
 '------------------------------------------------------------------------------------------------------------------------------------'
