@@ -191,7 +191,10 @@ def brightness(
 
 def bulk_density(single_molecule_mean, single_molecule_bg, data_bulk, data_bulk_filename, bulk_start_frame, roi_imagej, size_um, dol, brightness_correlation=False):      
         #bulk data
-    surface_density_bulk_avg, sem_bulk_avg, surface_density_bulk_ind, sem_bulk_ind, mean_bulk=[],[],[],[],[]
+    surface_density_bulk_avg, sem_bulk_avg = [], []
+    surface_density_bulk_ind, sem_bulk_ind = [], []
+    mean_bulk, sem_mean_bulk = [], []
+
     
     for file_bulk in range(0,len(data_bulk_filename)):
         data_files_bulk = sorted(Path(data_bulk).glob(data_bulk_filename[file_bulk]+"*.SPE")) #.tiff
@@ -211,7 +214,12 @@ def bulk_density(single_molecule_mean, single_molecule_bg, data_bulk, data_bulk_
         mean_int_bulk=np.nanmean(bulk_roi)
         mean_bulk.append(mean_int_bulk)
 
-          
+        # SEM der Bulk-Intensität über Positionen (für Errorbars im mean_bulk Plot)
+        n_pos = np.sum(~np.isnan(bulk_roi))
+        if n_pos >= 2:
+            sem_mean_bulk.append(np.nanstd(bulk_roi, ddof=1) / np.sqrt(n_pos))
+        else:
+            sem_mean_bulk.append(np.nan)
 
             #surface density: sm data are averaged
         surface_density_bulk_file_avg=np.round((((mean_int_bulk/(size_um[0]*size_um[1]))-(np.mean(single_molecule_bg)/(0.160*0.160)))/(np.mean(single_molecule_mean)))/dol,2)     
@@ -258,7 +266,8 @@ def bulk_density(single_molecule_mean, single_molecule_bg, data_bulk, data_bulk_
                 
            
 
-    return surface_density_bulk_avg, surface_density_bulk_ind, mean_bulk
+    return surface_density_bulk_avg, surface_density_bulk_ind, mean_bulk, sem_mean_bulk
+
 
 
 
